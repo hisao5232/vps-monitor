@@ -1,14 +1,23 @@
-# VPS Monitor Mini
+# VPS Pro Monitor
 
-Flet (Python) を使用した、VPSサーバーのメモリ使用率をリアルタイムで監視するデスクトップアプリです。
+PythonとFlet（Flutter）を使用した、軽量かつリアルタイムなVPS監視デスクトップアプリです。
 
-## 機能
-- SSH (Paramiko) を使用したリモートサーバー情報の取得
-- Windows デスクトップアプリとしての動作
-- 独自ポート（56756等）に対応
+## 特徴
+- **リアルタイム更新**: SSHセッションを維持し、非同期処理（Asyncio）を用いることで、10秒間隔の正確な更新を実現。
+- **視覚的なメーター**: CPU（青）、メモリ（緑）、ディスク（オレンジ）の使用率をバーグラフで直感的に把握可能。
+- **低負荷**: `top` や `free` コマンドを効率的に組み合わせ、VPS側の負荷を最小限に抑えています。
 
-## 使用技術
-- Python 3.12
-- Flet (Flutter for Python)
-- Paramiko (SSH client)
-- python-dotenv
+## 技術スタック
+- **Language**: Python 3.12+
+- **Framework**: Flet (Flutter)
+- **Library**: Paramiko (SSH), python-dotenv
+- **Architecture**: Asynchronous Programming (asyncio)
+
+## 開発の背景
+VPS（Ubuntu 24.04）の状態を、ブラウザを開かずにデスクトップの片隅で常に把握したいというニーズから開発しました。当初、通信の遅延（ブロッキング）により画面更新が1分ほど滞る問題が発生しましたが、非同期処理を導入することで「0.3秒以下のレスポンス」と「スムーズなUI描画」の両立に成功しました。
+
+## セットアップ
+1. リポジトリをクローン
+2. `.env` ファイルを作成し、SSH接続情報を設定
+3. `pip install -r requirements.txt` を実行
+4. `python main.py` で起動
