@@ -23,7 +23,6 @@ class VPSMonitor:
         self.ssh.connect(HOST, username=USER, key_filename=path, port=PORT, timeout=5)
 
     def get_info(self):
-        # Dockerコンテナの状態を取得
         cmds = [
             "hostname", 
             "free -m | awk 'NR==2{printf \"%.2f%%\", $3*100/$2 }'", 
@@ -44,16 +43,18 @@ class VPSMonitor:
             "containers": data[4].split('\n') if len(data) > 4 else []
         }
 
+    def prune_docker(self):
+        cmd = "docker image prune -f && docker volume prune -f"
+        self.ssh.exec_command(cmd)
+        return "Prune command sent"
+
 async def main(page: ft.Page):
-    page.title = "VPS Pro Monitor + Docker"
+    page.title = "VPS Pro Monitor"
     page.theme_mode = ft.ThemeMode.DARK
-    page.window_width = 400
-    page.window_height = 700
-    
-    # スクロールを有効化
+    page.window_width = 450
+    page.window_height = 800
     page.scroll = ft.ScrollMode.AUTO
     
-    # UI要素
     server_info = ft.Text("Connecting...", size=22, weight="bold", color="blue")
     cpu_label = ft.Text("CPU: ---", size=16, weight="bold")
     cpu_bar = ft.ProgressBar(width=320, value=0, color="blue")
@@ -61,8 +62,42 @@ async def main(page: ft.Page):
     mem_bar = ft.ProgressBar(width=320, value=0, color="green")
     disk_label = ft.Text("DISK: ---", size=16, weight="bold")
     disk_bar = ft.ProgressBar(width=320, value=0, color="orange")
+    
     container_list = ft.Column(spacing=5)
     status_log = ft.Text("Ready", italic=True, color="grey", size=12)
+    
+    # --- 追加: ボタン専用のメッセージ表示ラベル ---
+    prune_result_text = ft.Text("", size=14, weight="bold")
+
+    monitor = VPSMonitor()
+
+    async def on_prune_click(e):
+        prune_button.disabled = True
+        prune_result_text.value = "🗑️ Pruning Docker..."
+        prune_result_text.color = "orange"
+        page.update()
+        
+        try:
+            await asyncio.to_thread(monitor.prune_docker)
+            prune_result_text.value = "✅ Docker Pruned Successfully!"
+            prune_result_text.color = "cyan"
+        except Exception as ex:
+            prune_result_text.value = f"❌ Error: {ex}"
+            prune_result_text.color = "red"
+        
+        prune_button.disabled = False
+        page.update()
+        
+        # 5秒後にメッセージを消す（任意。ずっと出しておきたい場合はここを削除してください）
+        await asyncio.sleep(5)
+        prune_result_text.value = ""
+        page.update()
+
+    prune_button = ft.FilledButton(
+        content=ft.Text("🗑️ Cleanup Docker Assets", color="white"),
+        on_click=on_prune_click,
+        style=ft.ButtonStyle(bgcolor="red700")
+    )
 
     def to_val(s):
         try: return float(s.replace("%",""))/100
@@ -77,6 +112,10 @@ async def main(page: ft.Page):
                 mem_label, mem_bar,
                 disk_label, disk_bar,
                 ft.Divider(),
+                ft.Text("MAINTENANCE", weight="bold", color="red"),
+                prune_button,
+                prune_result_text,  # ボタンのすぐ下に配置
+                ft.Divider(),
                 ft.Text("RUNNING CONTAINERS", weight="bold", color="cyan"),
                 container_list,
                 ft.Divider(),
@@ -85,11 +124,8 @@ async def main(page: ft.Page):
             padding=20
         )
     )
-    
-    # update() は await せずに呼ぶ（エラー回避の肝）
     page.update()
 
-    monitor = VPSMonitor()
     try:
         await asyncio.to_thread(monitor.connect)
     except Exception as e:
@@ -99,10 +135,7 @@ async def main(page: ft.Page):
 
     while True:
         try:
-            # データの取得
             res = await asyncio.to_thread(monitor.get_info)
-            
-            # UIの更新
             server_info.value = f"Server: {res['name']}"
             cpu_label.value = f"CPU: {res['cpu']}"
             cpu_bar.value = to_val(res['cpu'])
@@ -131,16 +164,13 @@ async def main(page: ft.Page):
                             )
                         )
             
-            status_log.value = f"Last Update: {time.strftime('%H:%M:%S')}"
+            status_log.value = f"Update: {time.strftime('%H:%M:%S')}"
             status_log.color = "green"
         except Exception as e:
             status_log.value = f"Update Error: {e}"
             status_log.color = "red"
         
-        # page.update() を同期関数として呼ぶ
         page.update()
-        
-        # 待機だけは非同期で行い、UIフリーズを防ぐ
         await asyncio.sleep(10)
 
 if __name__ == "__main__":
