@@ -23,112 +23,124 @@ class VPSMonitor:
         self.ssh.connect(HOST, username=USER, key_filename=path, port=PORT, timeout=5)
 
     def get_info(self):
+        # Dockerコンテナの状態を取得
         cmds = [
             "hostname", 
             "free -m | awk 'NR==2{printf \"%.2f%%\", $3*100/$2 }'", 
             "top -bn1 | grep 'Cpu(s)' | awk '{print 100 - $8\"%\"}'", 
-            "df -h / | awk 'NR==2{print $5}'"
+            "df -h / | awk 'NR==2{print $5}'",
+            "docker ps --format '{{.Names}}:{{.Status}}'"
         ]
         full_cmd = " && ".join([f"echo '---'; {c}" for c in cmds])
         stdin, stdout, stderr = self.ssh.exec_command(full_cmd)
         results = stdout.read().decode().split("---")
         data = [r.strip() for r in results if r.strip()]
-        return {"name": data[0], "mem": data[1], "cpu": data[2], "disk": data[3]}
+        
+        return {
+            "name": data[0] if len(data) > 0 else "Unknown", 
+            "mem": data[1] if len(data) > 1 else "0%", 
+            "cpu": data[2] if len(data) > 2 else "0%", 
+            "disk": data[3] if len(data) > 3 else "0%",
+            "containers": data[4].split('\n') if len(data) > 4 else []
+        }
 
 async def main(page: ft.Page):
-    page.title = "VPS Pro Realtime Monitor"
+    page.title = "VPS Pro Monitor + Docker"
     page.theme_mode = ft.ThemeMode.DARK
     page.window_width = 400
-    page.window_height = 650
-    page.window_resizable = False
+    page.window_height = 700
     
-    # --- 1. UI要素の定義（バーグラフ付き） ---
-    server_info = ft.Text("Initializing...", size=22, weight="bold", color="blue")
+    # スクロールを有効化
+    page.scroll = ft.ScrollMode.AUTO
     
-    cpu_info = ft.Text("---", size=18, weight="bold")
-    cpu_bar = ft.ProgressBar(width=320, value=0, color="blue", bgcolor="#333333")
-    
-    mem_info = ft.Text("---", size=18, weight="bold")
-    mem_bar = ft.ProgressBar(width=320, value=0, color="green", bgcolor="#333333")
-    
-    disk_info = ft.Text("---", size=18, weight="bold")
-    disk_bar = ft.ProgressBar(width=320, value=0, color="orange", bgcolor="#333333")
-    
-    status_log = ft.Text("Ready to connect", italic=True, color="grey", size=12)
+    # UI要素
+    server_info = ft.Text("Connecting...", size=22, weight="bold", color="blue")
+    cpu_label = ft.Text("CPU: ---", size=16, weight="bold")
+    cpu_bar = ft.ProgressBar(width=320, value=0, color="blue")
+    mem_label = ft.Text("MEM: ---", size=16, weight="bold")
+    mem_bar = ft.ProgressBar(width=320, value=0, color="green")
+    disk_label = ft.Text("DISK: ---", size=16, weight="bold")
+    disk_bar = ft.ProgressBar(width=320, value=0, color="orange")
+    container_list = ft.Column(spacing=5)
+    status_log = ft.Text("Ready", italic=True, color="grey", size=12)
 
-    # 数値変換用
     def to_val(s):
-        try: return float(s.replace("%", "")) / 100
+        try: return float(s.replace("%",""))/100
         except: return 0
 
-    # レイアウト配置
     page.add(
         ft.Container(
             content=ft.Column([
                 server_info,
-                ft.Divider(height=30),
-                
-                ft.Text("CPU USAGE", size=12, color="grey"),
-                cpu_info, cpu_bar,
-                
-                ft.Container(height=10),
-                
-                ft.Text("MEMORY USAGE", size=12, color="grey"),
-                mem_info, mem_bar,
-                
-                ft.Container(height=10),
-                
-                ft.Text("DISK USAGE", size=12, color="grey"),
-                disk_info, disk_bar,
-                
-                ft.Divider(height=30),
+                ft.Divider(),
+                cpu_label, cpu_bar,
+                mem_label, mem_bar,
+                disk_label, disk_bar,
+                ft.Divider(),
+                ft.Text("RUNNING CONTAINERS", weight="bold", color="cyan"),
+                container_list,
+                ft.Divider(),
                 status_log
             ], horizontal_alignment="center"),
-            padding=30,
-            alignment=ft.Alignment(0, 0)
+            padding=20
         )
     )
+    
+    # update() は await せずに呼ぶ（エラー回避の肝）
     page.update()
 
     monitor = VPSMonitor()
-    
-    # SSH接続
     try:
-        status_log.value = "Status: Connecting to VPS..."
-        page.update()
         await asyncio.to_thread(monitor.connect)
-        status_log.value = "Status: Connected (Realtime mode)"
-        page.update()
     except Exception as e:
-        status_log.value = f"Connection Error: {e}"
+        status_log.value = f"Connect Error: {e}"
         page.update()
         return
 
-    # --- メインループ ---
     while True:
         try:
-            # データ取得
+            # データの取得
             res = await asyncio.to_thread(monitor.get_info)
             
-            # 画面反映
+            # UIの更新
             server_info.value = f"Server: {res['name']}"
-            cpu_info.value = res['cpu']
+            cpu_label.value = f"CPU: {res['cpu']}"
             cpu_bar.value = to_val(res['cpu'])
-            
-            mem_info.value = res['mem']
+            mem_label.value = f"MEM: {res['mem']}"
             mem_bar.value = to_val(res['mem'])
-            
-            disk_info.value = res['disk']
+            disk_label.value = f"DISK: {res['disk']}"
             disk_bar.value = to_val(res['disk'])
             
-            status_log.value = f"Last sync: {time.strftime('%H:%M:%S')}"
-            status_log.color = "green"
+            container_list.controls.clear()
+            if not res['containers'] or res['containers'] == ['']:
+                container_list.controls.append(ft.Text("No active containers", size=12, italic=True))
+            else:
+                for c in res['containers']:
+                    if ":" in c:
+                        name, c_status = c.split(":", 1)
+                        container_list.controls.append(
+                            ft.Container(
+                                content=ft.Row([
+                                    ft.Text("●", color="green" if "Up" in c_status else "red"),
+                                    ft.Text(f"{name}", weight="bold", expand=True),
+                                    ft.Text(f"{c_status.split(' ')[0]}", size=11, color="grey")
+                                ]),
+                                bgcolor="#222222",
+                                padding=10,
+                                border_radius=5
+                            )
+                        )
             
+            status_log.value = f"Last Update: {time.strftime('%H:%M:%S')}"
+            status_log.color = "green"
         except Exception as e:
             status_log.value = f"Update Error: {e}"
             status_log.color = "red"
-            
+        
+        # page.update() を同期関数として呼ぶ
         page.update()
+        
+        # 待機だけは非同期で行い、UIフリーズを防ぐ
         await asyncio.sleep(10)
 
 if __name__ == "__main__":
