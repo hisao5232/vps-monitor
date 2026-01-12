@@ -11,7 +11,7 @@ load_dotenv()
 HOST = os.getenv("VPS_HOST")
 USER = os.getenv("VPS_USER")
 KEY_PATH = os.getenv("SSH_KEY_PATH")
-PORT = int(os.getenv("VPS_PORT", 56756))
+PORT = int(os.getenv("VPS_PORT"))
 
 # --- バックエンド：VPSとの通信を管理するクラス ---
 class VPSMonitor:
@@ -215,4 +215,3 @@ async def main(page: ft.Page):
 
 if __name__ == "__main__":
     ft.app(target=main)
-    
